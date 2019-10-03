@@ -1,5 +1,5 @@
 
-!to "snake.prg", cbm	; set output file and format
+;!to "snake.prg", cbm	; set output file and format
 ;setup basic system statement to enable run command
 *=$0801
 !h 0d 08 0a 00 9e 20 24
@@ -10,26 +10,29 @@
 ; ---  Declarations  start  ----
 
 ;key mapping
-Up  = $57
-Down  = $53
-Left  = $41
-Right =  $44
+UpKey  = $57
+DownKey  = $53
+LeftKey  = $41
+RightKey =  $44
 ExitKey =  $58
 StartKey  = $53
 
 
-;kernel routine to get keyboard character
-GetKey  = $FFE4
+;kernel routine to get keyboard character and Print character
+CHRIN  = $FFE4
+CHROUT  = $FFD2
+SCREEN  = $FFED
 
 ;some storage locations for game variables
 
 CurrentDirection = $00
 SnakeHeadOffSet = $01
+GOFlag  = $02
 XValue  =  $3100
 YValue  =  $3200
 
-;Border values
-LeftBorder  = $fb
+;Zero Page Addresses to hold Border values
+LeftBorder  = $fb 
 UpperBorder = $fc
 RightBorder = $fd
 BottomBorder  = $fe
@@ -46,16 +49,17 @@ DelayStart  = $3010
 SnakeColor = $bb
 NoSnakeColor  = $ff
 AppleColor = $22
-StartColor  = $55
+StartColor  = $5B
+GOColor = $27
 
 ;--- init  start---
 Init:
-;add routine to get screen size and set boundaries
-  jsr Start
+;Setup for game
+  jsr Start ; start screen
 
   ;set color
   lda #NoSnakeColor
-  sta $0286
+  sta $0286 ; set screen color
 
 ;clear screen
   lda #147
@@ -92,22 +96,24 @@ loop1:
 
 
 ;start snake moving right
-  lda Right
+  lda #RightKey
   sta CurrentDirection
 
 ;get screen size and set borders
-;temp hardcoded need to check screen size and set as appropriate
+
+
+jsr SCREEN
+stx RightBorder
+sty BottomBorder
+
+rol RightBorder
+
 lda #$00
 sta UpperBorder
-
-lda #$01
 sta LeftBorder
+inc LeftBorder
 
-lda #$9f
-sta RightBorder
 
-lda #$3b
-sta BottomBorder
 
 ;place first apple at fixed location
 ldx #$33
@@ -120,6 +126,9 @@ stx VERA_addr_lo
 lda #AppleColor
 sta VERA_data_0
 
+lda #$FF
+sta GOFlag
+
 ;--- init End
 
 ;--- Main start------------------------------------------------------
@@ -131,6 +140,12 @@ jsr UpdateSnakeVector  ;update location values
 
 jsr DrawSnake ;draw snake
 
+lda GOFlag
+bne onemoreloop
+jsr GameOver
+jmp Init
+
+onemoreloop:
 jmp loop
 ;--- Main End ------------------------------------------------------
 
@@ -138,44 +153,47 @@ jmp loop
 ReadKey:
 
 ;kernal routine to get character from keyboard
-jsr GetKey
+jsr CHRIN
 
 ;load current direction to x-register
 ldx CurrentDirection
 
 ;compare keys to valid commands
-xkey:
-cmp #ExitKey  ;x PETSCII code
-bne wkey
-brk
-
 wkey:
-CMP #Up  ;w PETSCII code
+CMP #UpKey ;w PETSCII code
 bne skey
-cpx #Down ;exit if reverses direction
+cpx #DownKey;exit if reverses direction
 bne StoreNewDirection
-jmp Init
+lda #$00
+sta GOFlag
+rts
 
 skey:
-CMP #Down  ;s PETSCII code
+CMP #DownKey ;s PETSCII code
 bne akey
-cpx #Up ;exit if reverses direction
+cpx #UpKey;exit if reverses direction
 bne StoreNewDirection
-jmp Init
+lda #$00
+sta GOFlag
+rts
 
 akey:
-CMP #Left  ;a PETSCII code
+CMP #LeftKey ;a PETSCII code
 bne dkey
-cpx #Right ;exit if reverses direction
+cpx #RightKey ;exit if reverses direction
 bne StoreNewDirection
-jmp Init
+lda #$00
+sta GOFlag
+rts
 
 dkey:
-CMP #Right  ;d PETSCII code
+CMP #RightKey ;d PETSCII code
 bne novalidkey
-cpx #Left ;exit if reverses direction
+cpx #LeftKey;exit if reverses direction
 bne StoreNewDirection
-jmp Init
+lda #$00
+sta GOFlag
+rts
 
 StoreNewDirection:
 sta CurrentDirection
@@ -237,7 +255,7 @@ lda CurrentDirection
 ldx SnakeHeadOffSet
 
 ;move up code
-  cmp #Up  ;check if current direction is up
+  cmp #UpKey ;check if current direction is up
   bne down  ;if not next direction
   ;move up
   lda YValue,X
@@ -248,7 +266,7 @@ ldx SnakeHeadOffSet
 
 ;move down code
 down:
-  cmp #Down  ;check if current direction is down
+  cmp #DownKey ;check if current direction is down
   bne left  ;if not next direction
   ;move down
   lda YValue,X
@@ -258,7 +276,7 @@ down:
   rts
 
 left:
-  cmp #Left  ;check if current direction is down
+  cmp #LeftKey ;check if current direction is down
   bne right ;if not next direction
   ;move left
   lda XValue,X
@@ -271,14 +289,16 @@ left:
 right:
   ;if not up/down/left must move right
   lda RightBorder
-  cmp XValue,X  ;Compare location to left border
+  cmp XValue,X  ;Compare location to right border
   beq Collision  ;hit border ends game
   inc XValue,X  ;x direction is 2 positions from current screen is 2 bytes for each location
   inc XValue,X
   rts
 
 Collision:
-jmp GameOver
+lda #$00
+sta GOFlag
+rts
 
 ;----Detect Collision Start --------------
 DetectCollision:
@@ -388,7 +408,7 @@ rts
 ;start wait for s to start game
 
 Start:
-;routine waiting to start screen or exit
+;routine waiting in start screen or exit
 ;set color
 lda #StartColor
 sta $0286
@@ -397,10 +417,25 @@ sta $0286
 lda #147
 jsr $ffd2
 
+ldx	#0	; X register is used to index the string
+
+loopstartpage:
+	lda	.string,x ; Load character from string into A reg
+	beq	waitforstart	; If the character was 0, jump to end label
+	jsr	CHROUT	; Output character stored in A register
+	inx		; Increment X register
+	jmp	loopstartpage	; Jump back to loop label to print next char
+.string	!fi 15, 17
+ !fi 32, 29
+ !pet "press s to start"
+ !fi 16, 157
+ !fi 5, 17
+ !pet "press x to exit",0
+
 waitforstart:
 ;press s to start game
 ;need to add text to the screen
-  JSR GetKey  ;kernal routine to get key
+  JSR CHRIN  ;kernal routine to get key
   cmp #ExitKey
   bne checks
     brk
@@ -422,4 +457,33 @@ rts
 
 GameOver:
 ; code for end of game. Temp jump to init
-jmp Init
+;routine waiting in start screen or exit
+;set color
+lda #GOColor
+sta $0286
+
+;clear screen
+lda #147
+jsr $ffd2
+
+ldx	#0	; X register is used to index the string
+
+loopgopage:
+	lda	.string1,x ; Load character from string into A reg
+	beq	waitforgo	; If the character was 0, jump to end label
+	jsr	CHROUT	; Output character stored in A register
+	inx		; Increment X register
+	jmp	loopgopage	; Jump back to loop label to print next char
+.string1	!fi 15, 17
+ !fi 32, 29
+ !pet "game over"
+ !fi 16, 157
+ !fi 5, 17
+ !pet "press any key to continue",0
+ 
+
+waitforgo:
+  JSR CHRIN  ;kernal routine to get key
+  beq waitforgo
+rts
+
