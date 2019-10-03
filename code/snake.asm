@@ -105,8 +105,9 @@ loop1:
 jsr SCREEN
 stx RightBorder
 sty BottomBorder
-
+clc
 rol RightBorder
+inc RightBorder
 
 lda #$00
 sta UpperBorder
